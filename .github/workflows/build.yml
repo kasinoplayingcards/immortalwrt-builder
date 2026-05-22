@@ -1,4 +1,4 @@
-name: Build ImmortalWrt Stable
+name: Build ImmortalWrt Stable Pro
 
 on:
   workflow_dispatch:
@@ -49,32 +49,45 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 📑 载入核心菜单并强行修正底层 (防火墙与IPv6极致本地优化)
+    - name: 📑 载入核心菜单并强行智能化注入底层
       run: |
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
         cd openwrt
         
-        # 🟢 终极防火墙与IPv6优化脚本直接注入底层：
-        # 强行让系统在首次启动时默认关闭IPv6，并优化防火墙防漏水、增强UPnP BitComet绿灯效率
+        # 🟢 独家定制：全物理网口桥接 + 192.168.11.1 + 极致网络净化脚本
         mkdir -p files/etc/uci-defaults
         cat << 'EOF' > files/etc/uci-defaults/99-custom-settings
         #!/bin/sh
-        # 1. 彻底关闭所有物理接口的 IPv6 分配与解析
+        
+        # 1. 自动抓取机器上的所有物理网口，强行塞进 LAN 口桥接（实现盲插任意网口皆可登录后台）
+        logger "Starting advanced all-ports LAN bridge integration..."
+        ALL_IFS=$(ls /sys/class/net | grep -E '^eth|^en' | tr '\n' ' ')
+        if [ -n "$ALL_IFS" ]; then
+            uci set network.lan.device='br-lan'
+            uci set network.lan.type='bridge'
+            uci set network.lan.ports="$ALL_IFS"
+        fi
+
+        # 2. 修改默认管理 IP 地址为 192.168.11.1
+        uci set network.lan.ipaddr='192.168.11.1'
+        uci set network.lan.netmask='255.255.255.0'
+        
+        # 3. 彻底关闭全系统 IPv6 分配、解析与通告（防止物理级漏水）
         uci set network.lan.ipv6=0
-        uci set network.wan.ipv6=0
+        uci del network.wan6
         uci set dhcp.lan.dhcpv6='disabled'
         uci del dhcp.lan.ra
         uci del dhcp.lan.ra_management
+        /etc/init.d/odhcpd disable 2>/dev/null
         
-        # 2. 防火墙极致优化（解决端口满溢、防DNS污染漏水、开启全锥形NAT加速BitComet）
+        # 4. 防火墙极致优化（全锥形 Full-Cone NAT 硬件加速，BitComet 绝佳绿灯保障）
         uci set firewall.@defaults[0].flow_offloading='1'
         uci set firewall.@defaults[0].bbr='1'
         uci set firewall.@defaults[0].fullcone='1'
         
-        # 3. 强行关闭无用的内置 IPv6 防火墙服务
-        /etc/init.d/odhhcpd disable 2>/dev/null
-        
-        uci commit
+        uci commit network
+        uci commit dhcp
+        uci commit firewall
         exit 0
         EOF
         chmod +x files/etc/uci-defaults/99-custom-settings
@@ -100,12 +113,12 @@ jobs:
       run: |
         cd openwrt/bin/targets/x86/64/
         rm -rf packages
-        # 强行过滤掉不需要的各种非标准镜像，只留最纯净的 efi combined.img.gz
+        # 强制过滤干扰，只留下纯净无暇的 efi combined.img.gz 固件本体
         find . -type f ! -name "*combined-efi.img.gz" -exec rm -f {} \;
         echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
 
     - name: 💾 上传你专属的防污染软路由固件
       uses: actions/upload-artifact@v4
       with:
-        name: ImmortalWrt_X86_64_Pure_Firmware
+        name: ImmortalWrt_11.1_Pure_Firmware
         path: ${{ env.FIRMWARE_PATH }}/*
