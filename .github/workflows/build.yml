@@ -1,4 +1,4 @@
-name: Build ImmortalWrt Stable Pro
+name: Build ImmortalWrt Stable Pro V2
 
 on:
   workflow_dispatch:
@@ -8,6 +8,8 @@ env:
   REPO_BRANCH: openwrt-23.05
   CONFIG_FILE: .config
   TZ: Asia/Shanghai
+  # 🟢 解决病灶二：强行让所有 Actions 运行在 Node 24 上，彻底消除平台废弃警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   build:
@@ -54,12 +56,11 @@ jobs:
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
         cd openwrt
         
-        # 🟢 独家定制：全物理网口桥接 + 192.168.11.1 + 极致网络净化脚本
+        # 独家定制：全物理网口桥接 + 192.168.11.1 + 极致网络净化脚本
         mkdir -p files/etc/uci-defaults
         cat << 'EOF' > files/etc/uci-defaults/99-custom-settings
         #!/bin/sh
         
-        # 1. 自动抓取机器上的所有物理网口，强行塞进 LAN 口桥接（实现盲插任意网口皆可登录后台）
         logger "Starting advanced all-ports LAN bridge integration..."
         ALL_IFS=$(ls /sys/class/net | grep -E '^eth|^en' | tr '\n' ' ')
         if [ -n "$ALL_IFS" ]; then
@@ -68,11 +69,9 @@ jobs:
             uci set network.lan.ports="$ALL_IFS"
         fi
 
-        # 2. 修改默认管理 IP 地址为 192.168.11.1
         uci set network.lan.ipaddr='192.168.11.1'
         uci set network.lan.netmask='255.255.255.0'
         
-        # 3. 彻底关闭全系统 IPv6 分配、解析与通告（防止物理级漏水）
         uci set network.lan.ipv6=0
         uci del network.wan6
         uci set dhcp.lan.dhcpv6='disabled'
@@ -80,7 +79,6 @@ jobs:
         uci del dhcp.lan.ra_management
         /etc/init.d/odhcpd disable 2>/dev/null
         
-        # 4. 防火墙极致优化（全锥形 Full-Cone NAT 硬件加速，BitComet 绝佳绿灯保障）
         uci set firewall.@defaults[0].flow_offloading='1'
         uci set firewall.@defaults[0].bbr='1'
         uci set firewall.@defaults[0].fullcone='1'
@@ -103,11 +101,15 @@ jobs:
         make download -j8
         find dl -size -1024c -exec rm -f {} \;
 
-    - name: 🚀 生产环境核心编译 (全线程拉满)
+    - name: 🚀 生产环境核心编译 (降维智能安全熔断锁)
       run: |
         cd openwrt
-        set -o pipefail
-        make -j$(nproc) || make -j1 V=s
+        echo "=== 🟢 阶段 1：正在尝试多线程全速冲刺 ==="
+        # 如果全线程编译失败，绝不中断工作流，而是自动无缝把控制权交给单线程安全模式
+        make -j$(nproc) || {
+          echo "=== ⚠️ 警告：多线程撞墙崩溃！正在自动切入安全单线程模式，输出核心报错日志 ==="
+          make -j1 V=s
+        }
 
     - name: 📂 整理并输出全套固件 (仅保留纯净 img.gz)
       run: |
