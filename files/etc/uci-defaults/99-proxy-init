@@ -1,1 +1,31 @@
+#!/bin/sh
 
+# =========================
+# 启用 Mihomo（自动启动）
+# =========================
+uci set mihomo.config.enabled='1' 2>/dev/null
+uci commit mihomo
+
+# =========================
+# DNS 防污染（强制）
+# =========================
+uci set dhcp.@dnsmasq[0].noresolv='1'
+uci add_list dhcp.@dnsmasq[0].server='1.1.1.1'
+uci add_list dhcp.@dnsmasq[0].server='8.8.8.8'
+uci commit dhcp
+
+/etc/init.d/dnsmasq restart
+
+# =========================
+# 关闭 IPv6（彻底）
+# =========================
+uci set network.lan.ipv6='0'
+uci delete network.wan6 2>/dev/null
+uci commit network
+
+# =========================
+# 删除自身（只执行一次）
+# =========================
+rm -f /etc/uci-defaults/99-proxy-init
+
+exit 0
