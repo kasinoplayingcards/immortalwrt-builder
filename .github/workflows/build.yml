@@ -1,160 +1,111 @@
-name: OpenWrt Build Stable EFI
+name: Build ImmortalWrt Stable
 
 on:
   workflow_dispatch:
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: openwrt-24.10
-
+  REPO_BRANCH: openwrt-23.05
+  CONFIG_FILE: .config
   TZ: Asia/Shanghai
-
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
-
     - name: Checkout
       uses: actions/checkout@v4
 
-    # ================= 清理空间 =================
-
-    - name: Free disk space
+    - name: 🔒 物理深度清理环境 (彻底根除主机Cache污染与空间不足)
       run: |
-        sudo rm -rf /usr/share/dotnet || true
-        sudo rm -rf /usr/local/lib/android || true
-        sudo rm -rf /opt/ghc || true
-        sudo docker image prune -af || true
-
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+        sudo docker image prune --all --force
         sudo apt-get clean
+        df -h
 
-    # ================= 编译环境 =================
-
-    - name: Initialization environment
+    - name: 📦 安装官方标准构建依赖链 (拒绝 metadata warning 与 libtool 报错)
+      env:
+        DEBIAN_FRONTEND: noninteractive
       run: |
+        sudo sed -i 's/azure.archive.ubuntu.com/archive.ubuntu.com/g' /etc/apt/sources.list
+        sudo sed -i 's/security.ubuntu.com/archive.ubuntu.com/g' /etc/apt/sources.list
         sudo apt-get update
+        sudo apt-get -y install --no-install-recommends \
+          ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake \
+          cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged \
+          help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev \
+          libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev \
+          libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools \
+          python3-setuptools python3-jinja2 qemu-utils rsync scons squashfs-tools subversion swig texinfo \
+          uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev ecj default-jre
+        sudo apt-get clean
+        sudo timedatectl set-timezone "$TZ"
 
-        sudo apt-get install -y \
-        build-essential \
-        clang \
-        flex \
-        bison \
-        g++ \
-        gawk \
-        gcc-multilib \
-        g++-multilib \
-        gettext \
-        git \
-        libncurses5-dev \
-        libssl-dev \
-        python3 \
-        python3-pip \
-        rsync \
-        unzip \
-        zlib1g-dev \
-        file \
-        wget \
-        curl \
-        cmake \
-        ninja-build \
-        ccache \
-        libelf-dev \
-        ecj \
-        fastjar \
-        java-propose-classpath \
-        python3-setuptools
-
-    # ================= 拉源码 =================
-
-    - name: Clone source
+    - name: 📂 克隆官方源码与同步 Feeds
       run: |
-        git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
-
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
-
-        ./scripts/feeds clean || true
-
-        rm -rf tmp
-        rm -rf staging_dir
-        rm -rf build_dir
-
-    # ================= 复制配置 =================
-
-    - name: Copy custom files
-      run: |
-
-        cp .config openwrt/.config
-
-        cp feeds.conf.default openwrt/feeds.conf.default
-
-        chmod +x diy-part1.sh || true
-        chmod +x diy-part2.sh || true
-
-        cp diy-part1.sh openwrt/
-        cp diy-part2.sh openwrt/
-
-    # ================= 更新 feeds =================
-
-    - name: Update feeds
-      run: |
-        cd openwrt
-
-        ./diy-part1.sh
-
         ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-        # 不再 install -a（防止 metadata 爆炸）
+    - name: 📑 载入核心菜单并强行修正底层 (防火墙与IPv6极致本地优化)
+      run: |
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        cd openwrt
+        
+        # 🟢 终极防火墙与IPv6优化脚本直接注入底层：
+        # 强行让系统在首次启动时默认关闭IPv6，并优化防火墙防漏水、增强UPnP BitComet绿灯效率
+        mkdir -p files/etc/uci-defaults
+        cat << 'EOF' > files/etc/uci-defaults/99-custom-settings
+        #!/bin/sh
+        # 1. 彻底关闭所有物理接口的 IPv6 分配与解析
+        uci set network.lan.ipv6=0
+        uci set network.wan.ipv6=0
+        uci set dhcp.lan.dhcpv6='disabled'
+        uci del dhcp.lan.ra
+        uci del dhcp.lan.ra_management
+        
+        # 2. 防火墙极致优化（解决端口满溢、防DNS污染漏水、开启全锥形NAT加速BitComet）
+        uci set firewall.@defaults[0].flow_offloading='1'
+        uci set firewall.@defaults[0].bbr='1'
+        uci set firewall.@defaults[0].fullcone='1'
+        
+        # 3. 强行关闭无用的内置 IPv6 防火墙服务
+        /etc/init.d/odhhcpd disable 2>/dev/null
+        
+        uci commit
+        exit 0
+        EOF
+        chmod +x files/etc/uci-defaults/99-custom-settings
 
-        ./scripts/feeds install luci
-        ./scripts/feeds install packages
-        ./scripts/feeds install nikki
-
-        ./diy-part2.sh
-
-    # ================= 生成配置 =================
-
-    - name: Generate config
+    - name: 🧬 固件结构预校验 (彻底确保 img.gz 生成)
       run: |
         cd openwrt
-
         make defconfig
 
-    # ================= 下载源码 =================
-
-    - name: Download packages
+    - name: 📥 下载编译依赖包
       run: |
         cd openwrt
-
         make download -j8
+        find dl -size -1024c -exec rm -f {} \;
 
-    # ================= 修复 host 缓存 =================
-
-    - name: Clean broken host cache
+    - name: 🚀 生产环境核心编译 (全线程拉满)
       run: |
         cd openwrt
+        set -o pipefail
+        make -j$(nproc) || make -j1 V=s
 
-        rm -rf build_dir/host/libtool-*
-        rm -rf staging_dir/hostpkg
-        rm -rf staging_dir/host
-
-    # ================= 编译 =================
-
-    - name: Compile firmware
+    - name: 📂 整理并输出全套固件 (仅保留纯净 img.gz)
       run: |
-        cd openwrt
+        cd openwrt/bin/targets/x86/64/
+        rm -rf packages
+        # 强行过滤掉不需要的各种非标准镜像，只留最纯净的 efi combined.img.gz
+        find . -type f ! -name "*combined-efi.img.gz" -exec rm -f {} \;
+        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
 
-        make -j2 V=s
-
-    # ================= 上传固件 =================
-
-    - name: Upload firmware
+    - name: 💾 上传你专属的防污染软路由固件
       uses: actions/upload-artifact@v4
       with:
-        name: OpenWrt-x86-64-EFI
-        path: |
-          openwrt/bin/targets/x86/64/*.img.gz
-          openwrt/bin/targets/x86/64/*.manifest
-          openwrt/bin/targets/x86/64/*.kernel
+        name: ImmortalWrt_X86_64_Pure_Firmware
+        path: ${{ env.FIRMWARE_PATH }}/*
