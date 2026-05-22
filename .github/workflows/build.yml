@@ -14,55 +14,94 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      # ========================
+      # 1. 拉取仓库
+      # ========================
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Free space
+      # ========================
+      # 2. 清理空间（防爆盘）
+      # ========================
+      - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
           sudo apt-get clean
 
-      - name: Install deps
+      # ========================
+      # 3. 安装依赖
+      # ========================
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk git \
           libncurses5-dev libssl-dev python3 rsync unzip wget curl
 
-      - name: Clone source
+      # ========================
+      # 4. 克隆源码
+      # ========================
+      - name: Clone OpenWrt
         run: |
           git clone $REPO_URL -b $REPO_BRANCH openwrt
 
-      - name: Feeds update
+      # ========================
+      # 5. Feeds（关键）
+      # ========================
+      - name: Feeds update & install
         run: |
           cp feeds.conf.default openwrt/feeds.conf.default
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Prepare files
+      # ========================
+      # 6. 复制自定义文件
+      # ========================
+      - name: Apply custom files
         run: |
           cp -r files openwrt/
           cp .config openwrt/
           cp diy-part1.sh openwrt/
           cp diy-part2.sh openwrt/
 
-      - name: Build prepare
+      # ========================
+      # 7. 权限修复（关键）
+      # ========================
+      - name: Fix permissions
+        run: |
+          chmod +x openwrt/diy-part1.sh
+          chmod +x openwrt/diy-part2.sh
+          chmod +x openwrt/files/etc/uci-defaults/99-proxy-init || true
+
+      # ========================
+      # 8. 预处理配置
+      # ========================
+      - name: Prepare config
         run: |
           cd openwrt
-          chmod +x diy-part1.sh diy-part2.sh
           ./diy-part1.sh
           make defconfig
 
-      - name: Download
+      # ========================
+      # 9. 下载依赖包
+      # ========================
+      - name: Download packages
         run: |
           cd openwrt
           make download -j8
 
+      # ========================
+      # 10. 编译固件
+      # ========================
       - name: Build firmware
         run: |
           cd openwrt
           make -j$(nproc) || make -j1 V=s
 
-      - name: Upload
+      # ========================
+      # 11. 上传固件
+      # ========================
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ImmortalWrt-Pro
