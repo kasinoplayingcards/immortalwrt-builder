@@ -57,26 +57,42 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 🚀 降维打击 4.0：改用社区高可用镜像源强制注入 Nikki (免疫 Exit Code 128)
+    - name: 🚀 降维打击 5.0：通过公共综合大仓高可靠性提取并注入 Nikki (完美破解128)
       run: |
         cd openwrt
         
-        # 核心防御：强行拔除第三方 Feeds 源中可能附带的任何旧版或冲突的 nikki 组件
+        # 核心防御：强行拔除原有 Feeds 源中可能附带的任何旧版或冲突的 nikki 组件
         find feeds/ -type d -name "luci-app-nikki" -exec rm -rf {} + 2>/dev/null || true
         find feeds/ -type d -name "nikki" -exec rm -rf {} + 2>/dev/null || true
         
         # 创建纯净的目标物理口袋
         mkdir -p package/nikki
         
-        # 终极修复：放弃无法访问的原版仓库，改用完美存活的社区同步镜像源
-        echo "=== 📥 启动社区高可用源拉取 Nikki 源码... ==="
-        git clone --depth=1 https://github.com/chinasun0221/openwrt-nikki.git nikki_raw
+        # 终极修正：直接从高能、公开且全天候同步的社区大仓中提取 Nikki 核心组件
+        echo "=== 📥 正在从社区综合大厂源拉取 Nikki 稳健代码... ==="
+        git clone --depth=1 https://github.com/kiddin9/openwrt-packages.git pac_raw
         
-        # 将克隆下来的内容精准平移进口袋 (包括隐藏文件)
-        cp -a nikki_raw/. package/nikki/
+        # 精准捕获：支持平移 luci-app-nikki 或纯 nikki 核心包结构
+        if [ -d "pac_raw/luci-app-nikki" ]; then
+          cp -a pac_raw/luci-app-nikki/* package/nikki/
+        elif [ -d "pac_raw/nikki" ]; then
+          cp -a pac_raw/nikki/* package/nikki/
+        fi
         
-        # 清理残余缓存
-        rm -rf nikki_raw
+        # 备用容错链：如果主大仓未命中，自动滑向另一个大厂源
+        if [ ! -f "package/nikki/Makefile" ]; then
+          echo "=== ⚠️ 主源未命中，正在启动备用大仓提取... ==="
+          rm -rf pac_raw
+          git clone --depth=1 https://github.com/sbwml/openwrt_pkgs.git pac_raw
+          if [ -d "pac_raw/luci-app-nikki" ]; then
+            cp -a pac_raw/luci-app-nikki/* package/nikki/
+          elif [ -d "pac_raw/nikki" ]; then
+            cp -a pac_raw/nikki/* package/nikki/
+          fi
+        fi
+        
+        # 清理残留的缓存
+        rm -rf pac_raw
         
         echo "=== 🟢 Nikki 源码强注成功！结构验证如下 ==="
         ls -la package/nikki
@@ -117,7 +133,6 @@ jobs:
     - name: 🧬 固件结构预校验 (强注非交互终端环境变量)
       run: |
         cd openwrt
-        # 强制声明哑终端，压制任何潜在的 menuconfig 图形弹窗企图
         export TERMINFO=/usr/share/terminfo
         export TERM=dumb
         make defconfig
