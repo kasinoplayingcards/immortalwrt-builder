@@ -1,4 +1,4 @@
-name: Build ImmortalWrt Stable Pro V2
+name: Build ImmortalWrt Stable Pro V3
 
 on:
   workflow_dispatch:
@@ -8,7 +8,6 @@ env:
   REPO_BRANCH: openwrt-23.05
   CONFIG_FILE: .config
   TZ: Asia/Shanghai
-  # 🟢 解决病灶二：强行让所有 Actions 运行在 Node 24 上，彻底消除平台废弃警告
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
@@ -19,14 +18,13 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: 🔒 物理深度清理环境 (彻底根除主机Cache污染与空间不足)
+    - name: 🔒 物理深度清理环境 (释放最大内存与磁盘给Nikki和Samba)
       run: |
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
         sudo docker image prune --all --force
         sudo apt-get clean
-        df -h
 
-    - name: 📦 安装官方标准构建依赖链 (拒绝 metadata warning 与 libtool 报错)
+    - name: 📦 安装官方标准构建依赖链
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -42,7 +40,6 @@ jobs:
           python3-setuptools python3-jinja2 qemu-utils rsync scons squashfs-tools subversion swig texinfo \
           uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev ecj default-jre
         sudo apt-get clean
-        sudo timedatectl set-timezone "$TZ"
 
     - name: 📂 克隆官方源码与同步 Feeds
       run: |
@@ -56,33 +53,26 @@ jobs:
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
         cd openwrt
         
-        # 独家定制：全物理网口桥接 + 192.168.11.1 + 极致网络净化脚本
         mkdir -p files/etc/uci-defaults
         cat << 'EOF' > files/etc/uci-defaults/99-custom-settings
         #!/bin/sh
-        
-        logger "Starting advanced all-ports LAN bridge integration..."
         ALL_IFS=$(ls /sys/class/net | grep -E '^eth|^en' | tr '\n' ' ')
         if [ -n "$ALL_IFS" ]; then
             uci set network.lan.device='br-lan'
             uci set network.lan.type='bridge'
             uci set network.lan.ports="$ALL_IFS"
         fi
-
         uci set network.lan.ipaddr='192.168.11.1'
         uci set network.lan.netmask='255.255.255.0'
-        
         uci set network.lan.ipv6=0
         uci del network.wan6
         uci set dhcp.lan.dhcpv6='disabled'
         uci del dhcp.lan.ra
         uci del dhcp.lan.ra_management
         /etc/init.d/odhcpd disable 2>/dev/null
-        
         uci set firewall.@defaults[0].flow_offloading='1'
         uci set firewall.@defaults[0].bbr='1'
         uci set firewall.@defaults[0].fullcone='1'
-        
         uci commit network
         uci commit dhcp
         uci commit firewall
@@ -90,7 +80,7 @@ jobs:
         EOF
         chmod +x files/etc/uci-defaults/99-custom-settings
 
-    - name: 🧬 固件结构预校验 (彻底确保 img.gz 生成)
+    - name: 🧬 固件结构预校验
       run: |
         cd openwrt
         make defconfig
@@ -101,26 +91,36 @@ jobs:
         make download -j8
         find dl -size -1024c -exec rm -f {} \;
 
-    - name: 🚀 生产环境核心编译 (降维智能安全熔断锁)
+    - name: 🚀 生产环境核心编译 (全时黑匣子日志分流模式)
       run: |
         cd openwrt
-        echo "=== 🟢 阶段 1：正在尝试多线程全速冲刺 ==="
-        # 如果全线程编译失败，绝不中断工作流，而是自动无缝把控制权交给单线程安全模式
-        make -j$(nproc) || {
-          echo "=== ⚠️ 警告：多线程撞墙崩溃！正在自动切入安全单线程模式，输出核心报错日志 ==="
-          make -j1 V=s
+        echo "=== 🟢 正在全速编译，错误日志将实时同步至本地黑匣子 ==="
+        # 使用 tee 强制将标准输出和错误输出同时拧成一股绳，存入本地名位 build.log 的黑匣子里
+        make -j$(nproc) 2>&1 | tee build.log || {
+          echo "=== ⚠️ 警告：多线程撞墙！正在切换单线程提取真实致命报错 ==="
+          make -j1 V=s 2>&1 | tee -a build.log
         }
 
-    - name: 📂 整理并输出全套固件 (仅保留纯净 img.gz)
+    - name: 📂 整理并输出全套固件 (带安全打捞机制)
       run: |
-        cd openwrt/bin/targets/x86/64/
-        rm -rf packages
-        # 强制过滤干扰，只留下纯净无暇的 efi combined.img.gz 固件本体
-        find . -type f ! -name "*combined-efi.img.gz" -exec rm -f {} \;
-        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
+        cd openwrt
+        # 如果顺利生成了目标目录，我们才进去过滤
+        if [ -d "bin/targets/x86/64/" ]; then
+          cd bin/targets/x86/64/
+          rm -rf packages
+          find . -type f ! -name "*combined-efi.img.gz" -exec rm -f {} \;
+          echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
+        else
+          # 🔥 降维打捞：如果固件没生成，强行把“黑匣子日志”伪装成固件抛给下一阶段，供你下载查看！
+          echo "=== 🚨 检测到固件未生成！正在启动应急打捞机制，将编译日志打包输出... ==="
+          mkdir -p bin/targets/x86/64/
+          cp build.log bin/targets/x86/64/CORE_ERROR_LOG.txt
+          cd bin/targets/x86/64/
+          echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
+        fi
 
-    - name: 💾 上传你专属的防污染软路由固件
+    - name: 💾 上传你专属的固件（或错误日志报告）
       uses: actions/upload-artifact@v4
       with:
-        name: ImmortalWrt_11.1_Pure_Firmware
+        name: ImmortalWrt_Compile_Result
         path: ${{ env.FIRMWARE_PATH }}/*
