@@ -57,7 +57,7 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 🚀 降维打击 2.0：通过高容错 Zip 分流技术强注 Nikki (修复 404 分支错位)
+    - name: 🚀 降维打击 3.0：改用轻量级单层 Git 克隆注入 Nikki (免疫404)
       run: |
         cd openwrt
         
@@ -68,23 +68,15 @@ jobs:
         # 创建纯净的目标物理口袋
         mkdir -p package/nikki
         
-        # 核心修正：优先拉取 master 分支（Nikki 官方主力），若 404 则自动降级尝试 main 分支
-        echo "=== 📥 开始拉取 Nikki 官方主分支源码包... ==="
-        wget --tries=5 --timeout=30 -O nikki.zip https://github.com/nikki-core/openwrt-nikki/archive/refs/heads/master.zip || \
-        wget --tries=5 --timeout=30 -O nikki.zip https://github.com/nikki-core/openwrt-nikki/archive/refs/heads/main.zip
+        # 终极修正：放弃不稳定的网页版 zip，直接用 git clone --depth=1 去撞官方主力分支
+        echo "=== 📥 启动 Git 底层协议拉取 Nikki 源码... ==="
+        git clone --depth=1 https://github.com/nikki-core/openwrt-nikki.git nikki_raw
         
-        # 精准解压
-        unzip -q nikki.zip
+        # 将克隆下来的内容精准平移进口袋 (包括隐藏文件)
+        cp -a nikki_raw/. package/nikki/
         
-        # 智能化目录收纳：无论解压出来叫 -master 还是 -main 统统精准移入目标口袋
-        if [ -d "openwrt-nikki-master" ]; then
-          mv openwrt-nikki-master/* package/nikki/
-        elif [ -d "openwrt-nikki-main" ]; then
-          mv openwrt-nikki-main/* package/nikki/
-        fi
-        
-        # 清理缓冲垃圾
-        rm -rf nikki.zip openwrt-nikki-master openwrt-nikki-main
+        # 清理残留的缓存
+        rm -rf nikki_raw
         
         echo "=== 🟢 Nikki 源码强注成功！结构验证如下 ==="
         ls -la package/nikki
