@@ -24,13 +24,14 @@ jobs:
         sudo docker image prune --all --force
         sudo apt-get clean
 
-    - name: 🛠️ 核心突破：强行开辟 4GB 虚拟内存装甲 (彻底干掉 OOM Killer 物理击杀)
+    - name: 🛠️ 核心突破：安全叠加 4GB 独立虚拟内存装甲
       run: |
-        sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
-        sudo chmod 600 /swapfile
-        sudo mkswap /swapfile
-        sudo swapon /swapfile
-        echo "=== 🟢 虚拟内存加载成功！当前系统物理+虚拟总内存如下 ==="
+        # 在空间充足的 /mnt 目录下创建专属的虚拟内存文件，避开系统自带的 /swapfile
+        sudo dd if=/dev/zero of=/mnt/swap_armor bs=1M count=4096
+        sudo chmod 600 /mnt/swap_armor
+        sudo mkswap /mnt/swap_armor
+        sudo swapon /mnt/swap_armor
+        echo "=== 🟢 专属虚拟内存叠加成功！当前系统物理+虚拟总内存如下 ==="
         free -h
 
     - name: 📦 安装官方标准构建依赖链
