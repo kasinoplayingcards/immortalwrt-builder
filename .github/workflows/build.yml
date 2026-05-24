@@ -60,26 +60,19 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 🚀 降维打击 7.0：利用 ImmortalWrt 官方原生 Feeds 提取并本地注入 Nikki (免网路握手)
+    - name: 🚀 降维打击 8.0：强行抹除官方同名源，无缝接入 Nikki 独立专用仓库
       run: |
         cd openwrt
-        mkdir -p package/custom
-        FOUND_NIKKI=0
         
-        if [ -d "feeds/packages/net/nikki" ]; then
-          cp -a feeds/packages/net/nikki package/custom/
-          FOUND_NIKKI=1
-        fi
-        if [ -d "feeds/luci/applications/luci-app-nikki" ]; then
-          cp -a feeds/luci/applications/luci-app-nikki package/custom/
-          FOUND_NIKKI=1
-        fi
-        if [ $FOUND_NIKKI -eq 0 ]; then
-          find feeds/ -type d -name "nikki" -exec cp -a {} package/custom/ \; 2>/dev/null || true
-          find feeds/ -type d -name "luci-app-nikki" -exec cp -a {} package/custom/ \; 2>/dev/null || true
-        fi
-        echo "=== 🟢 Nikki 本地源码平移完毕！目录验证： ==="
-        ls -la package/custom
+        # 【核心去重补丁】：物理删除官方源中可能导致索引冲突的所有旧版 nikki 文件夹
+        rm -rf feeds/packages/net/nikki
+        rm -rf feeds/luci/applications/luci-app-nikki
+        
+        # 引入专职的 Nikki 官方独立仓库（确保核心与LuCI界面版本绝对同步）
+        git clone https://github.com/nikkinikki-org/OpenWrt-nikki.git package/custom-nikki
+        
+        echo "=== 🟢 官方同名冲突已物理断绝！最新独立专属源码注入成功 ==="
+        ls -la package/custom-nikki
 
     - name: 📑 载入核心菜单并强行智能化注入底层
       run: |
@@ -90,7 +83,6 @@ jobs:
         mkdir -p files/etc/uci-defaults
         cat << 'EOF' > files/etc/uci-defaults/99-custom-settings
         #!/bin/sh
-        # 建立网桥，强行绑定 eth0, eth2, eth3 为局域网
         uci set network.lan.device='br-lan'
         uci set network.lan.type='bridge'
         uci set network.lan.ports='eth0 eth2 eth3'
@@ -98,7 +90,6 @@ jobs:
         uci set network.lan.netmask='255.255.255.0'
         uci set network.lan.ipv6=0
         
-        # 强行指定 eth1 为专职 WAN 口，采用 DHCP 获取上级网络
         uci set network.wan.device='eth1'
         uci set network.wan.proto='dhcp'
         
@@ -117,21 +108,25 @@ jobs:
         EOF
         chmod +x files/etc/uci-defaults/99-custom-settings
 
-        # 固件大空间扩容核心黑魔法（Boot拉大到64M，系统根Rootfs分区直接拉大到1024M即1GB）
+        # 固件大空间扩容核心黑魔法（Boot 64M，根分区 1GB 养老大空间）
         sed -i 's/CONFIG_TARGET_KERNEL_PARTSIZE=.*/CONFIG_TARGET_KERNEL_PARTSIZE=64/' .config
         sed -i 's/CONFIG_TARGET_ROOTFS_PARTSIZE=.*/CONFIG_TARGET_ROOTFS_PARTSIZE=1024/' .config
 
-    - name: 🧬 固件结构预校验 (强注非交互终端环境变量与组件开关)
+    - name: 🧬 固件结构预校验 (深度重构核心全局开关)
       run: |
         cd openwrt
         
-        # 【防漏包补丁】：在 .config 最末尾强行注入全局编译总开关
+        # 更新并强制刷新全局包索引，让编译器强行吞入我们在 package/ 目录下准备好的新肉
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        
+        # 【防漏包强制声明】：在 .config 最末尾写入最高编译优先级
         echo "" >> .config
         echo "CONFIG_PACKAGE_nikki=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
         echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
         
-        # 补齐运行必须的底层依赖（证书与CA包，避免安全链接握手失败）
+        # 补齐 TLS / HTTPS / 国外节点安全握手所必须的 CA 证书依赖链
         echo "CONFIG_PACKAGE_ca-bundle=y" >> .config
         echo "CONFIG_PACKAGE_libustream-openssl=y" >> .config
         
@@ -148,7 +143,7 @@ jobs:
     - name: 🚀 生产环境核心编译 (双线程安全稳健模式)
       run: |
         cd openwrt
-        echo "=== 🟢 阶段 1：启动双线程稳健编译 ==="
+        echo "=== 🟢 启动双线程稳健编译 ==="
         export TERM=dumb
         make -j2 V=s
 
@@ -165,7 +160,7 @@ jobs:
           echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
         fi
 
-    - name: 💾 上传 Nikki 版专属固件
+    - name: 💾 上传 Nikki 强注版专属固件
       if: success()
       uses: actions/upload-artifact@v4
       with:
