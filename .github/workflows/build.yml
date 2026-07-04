@@ -1,18 +1,14 @@
-name: ImmortalWrt 24.10.6 Stable Build
+name: ImmortalWrt 24.10.6 Stable
 
 on:
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Build firmware
         run: |
@@ -22,10 +18,8 @@ jobs:
             ghcr.io/immortalwrt/imagebuilder:x86-64-24.10.6 \
             /bin/bash shell/build.sh
 
-      - name: Upload firmware
+      - name: Upload
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: immortalwrt-24.10.6
+          tag_name: fw-24.10.6
           files: bin/targets/x86/64/*img.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
