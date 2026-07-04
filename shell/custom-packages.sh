@@ -14,14 +14,11 @@ luci-app-firewall
 luci-app-opkg
 luci-app-ttyd
 
-# =====================
-# Network features
-# =====================
 luci-app-upnp
 p910nd
 
 # =====================
-# Proxy layer
+# Proxy stack
 # =====================
 daed
 luci-app-daed
