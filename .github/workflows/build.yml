@@ -1,178 +1,31 @@
-name: Build ImmortalWrt Nikki Pro Stable
+name: ImmortalWrt 24.10.6 Stable Build
 
 on:
   workflow_dispatch:
 
-env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: openwrt-23.05
-  CONFIG_FILE: .config
-  TZ: Asia/Shanghai
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-      actions: write
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: 🔒 物理空间深度清理
-      run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
-        sudo docker image prune --all --force
-        sudo apt-get clean
+      - name: Build firmware
+        run: |
+          docker run --rm \
+            -v $PWD:/builder \
+            -w /builder \
+            ghcr.io/immortalwrt/imagebuilder:x86-64-24.10.6 \
+            /bin/bash shell/build.sh
 
-    - name: 🛠️ 核心突破：安全叠加 4GB 独立虚拟内存装甲
-      run: |
-        sudo dd if=/dev/zero of=/mnt/swap_armor bs=1M count=4096
-        sudo chmod 600 /mnt/swap_armor
-        sudo mkswap /mnt/swap_armor
-        sudo swapon /mnt/swap_armor
-        echo "=== 🟢 专属虚拟内存叠加成功！ ==="
-        free -h
-
-    - name: 📦 安装官方标准构建依赖链
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo sed -i 's/azure.archive.ubuntu.com/archive.ubuntu.com/g' /etc/apt/sources.list
-        sudo sed -i 's/security.ubuntu.com/archive.ubuntu.com/g' /etc/apt/sources.list
-        sudo apt-get update
-        sudo apt-get -y install --no-install-recommends \
-          ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake \
-          cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged \
-          help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev \
-          libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev \
-          libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools \
-          python3-setuptools python3-jinja2 qemu-utils rsync scons squashfs-tools subversion swig texinfo \
-          uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev ecj default-jre
-        sudo apt-get clean
-
-    - name: 📂 克隆官方源码与同步 Feeds
-      run: |
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
-        cd openwrt
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-
-    - name: 🚀 降维打击 8.0：强行抹除官方同名源，无缝接入 Nikki 独立专用仓库
-      run: |
-        cd openwrt
-        
-        # 【核心去重补丁】：物理删除官方源中可能导致索引冲突的所有旧版 nikki 文件夹
-        rm -rf feeds/packages/net/nikki
-        rm -rf feeds/luci/applications/luci-app-nikki
-        
-        # 引入专职的 Nikki 官方独立仓库（确保核心与LuCI界面版本绝对同步）
-        git clone https://github.com/nikkinikki-org/OpenWrt-nikki.git package/custom-nikki
-        
-        echo "=== 🟢 官方同名冲突已物理断绝！最新独立专属源码注入成功 ==="
-        ls -la package/custom-nikki
-
-    - name: 📑 载入核心菜单并强行智能化注入底层
-      run: |
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-        cd openwrt
-        
-        # 网络接口定向重组（eth1为WAN，eth0,2,3为LAN桥接）
-        mkdir -p files/etc/uci-defaults
-        cat << 'EOF' > files/etc/uci-defaults/99-custom-settings
-        #!/bin/sh
-        uci set network.lan.device='br-lan'
-        uci set network.lan.type='bridge'
-        uci set network.lan.ports='eth0 eth2 eth3'
-        uci set network.lan.ipaddr='192.168.11.1'
-        uci set network.lan.netmask='255.255.255.0'
-        uci set network.lan.ipv6=0
-        
-        uci set network.wan.device='eth1'
-        uci set network.wan.proto='dhcp'
-        
-        uci del network.wan6
-        uci set dhcp.lan.dhcpv6='disabled'
-        uci del dhcp.lan.ra
-        uci del dhcp.lan.ra_management
-        /etc/init.d/odhcpd disable 2>/dev/null
-        uci set firewall.@defaults[0].flow_offloading='1'
-        uci set firewall.@defaults[0].bbr='1'
-        uci set firewall.@defaults[0].fullcone='1'
-        uci commit network
-        uci commit dhcp
-        uci commit firewall
-        exit 0
-        EOF
-        chmod +x files/etc/uci-defaults/99-custom-settings
-
-        # 固件大空间扩容核心黑魔法（Boot 64M，根分区 1GB 养老大空间）
-        sed -i 's/CONFIG_TARGET_KERNEL_PARTSIZE=.*/CONFIG_TARGET_KERNEL_PARTSIZE=64/' .config
-        sed -i 's/CONFIG_TARGET_ROOTFS_PARTSIZE=.*/CONFIG_TARGET_ROOTFS_PARTSIZE=1024/' .config
-
-    - name: 🧬 固件结构预校验 (深度重构核心全局开关)
-      run: |
-        cd openwrt
-        
-        # 更新并强制刷新全局包索引，让编译器强行吞入我们在 package/ 目录下准备好的新肉
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-        
-        # 【防漏包强制声明】：在 .config 最末尾写入最高编译优先级
-        echo "" >> .config
-        echo "CONFIG_PACKAGE_nikki=y" >> .config
-        echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
-        echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
-        
-        # 补齐 TLS / HTTPS / 国外节点安全握手所必须的 CA 证书依赖链
-        echo "CONFIG_PACKAGE_ca-bundle=y" >> .config
-        echo "CONFIG_PACKAGE_libustream-openssl=y" >> .config
-        
-        export TERMINFO=/usr/share/terminfo
-        export TERM=dumb
-        make defconfig
-
-    - name: 📥 下载编译依赖包与严厉清洗
-      run: |
-        cd openwrt
-        make download -j8
-        find dl -size -1024c -exec rm -f {} \;
-
-    - name: 🚀 生产环境核心编译 (双线程安全稳健模式)
-      run: |
-        cd openwrt
-        echo "=== 🟢 启动双线程稳健编译 ==="
-        export TERM=dumb
-        make -j2 V=s
-
-    - name: 📂 整理并输出全套固件 (放开所有限制，正常生成)
-      if: success()
-      run: |
-        cd openwrt
-        if [ -d "bin/targets/x86/64/" ] && [ "$(ls -A bin/targets/x86/64/)" ]; then
-          echo "=== 🎉 发现固件产物！正在清理不必要的 packages 文件夹... ==="
-          cd bin/targets/x86/64/
-          rm -rf packages
-          echo "=== 🟢 当前生成的全套固件列表如下： ==="
-          ls -lh
-          echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
-        fi
-
-    - name: 💾 上传 Nikki 强注版专属固件
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: ImmortalWrt_23.05_Nikki_Stable
-        path: ${{ env.FIRMWARE_PATH }}/*
-
-    - name: 🚨 应急错误深度打捞与大字报盲显
-      if: failure()
-      run: |
-        echo "=========================================================================="
-        echo "❌ 编译因 [Exit Code 2] 深度熔断！正在为您打捞最后 100 行核心错误现场..."
-        echo "=========================================================================="
-        cd openwrt
-        find logs/package/ -name "*.txt" -exec sh -c 'echo "=== Log for {} ==="; tail -n 50 {}' \; 2>/dev/null || true
-        make -j1 V=s || true
+      - name: Upload firmware
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: immortalwrt-24.10.6
+          files: bin/targets/x86/64/*img.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
