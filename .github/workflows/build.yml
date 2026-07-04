@@ -1,10 +1,7 @@
-name: ImmortalWrt 24.10.6 Stable
+name: wukong-style-build
 
 on:
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -14,29 +11,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # =========================
-      # Build firmware (stable)
-      # =========================
       - name: Build firmware
         run: |
-          set -e
-
-          docker pull ghcr.io/immortalwrt/imagebuilder:x86-64-24.10.6
-
           docker run --rm \
-            --user root \
             -v $PWD:/builder \
             -w /builder \
             ghcr.io/immortalwrt/imagebuilder:x86-64-24.10.6 \
-            /bin/bash /builder/shell/build.sh
+            /bin/bash shell/build.sh
 
-      # =========================
-      # Upload artifact
-      # =========================
       - name: Upload firmware
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: fw-24.10.6
-          files: bin/targets/x86/64/*squashfs-combined-efi.img.gz
+          tag_name: wukong-fw-24.10.6
+          files: bin/targets/x86/64/*img.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
